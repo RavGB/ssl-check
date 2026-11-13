@@ -1,0 +1,3 @@
+# Binary built by "go build"
+/ssl-check
+dist/
