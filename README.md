@@ -100,7 +100,7 @@ intermediate certificate.
 ```text
 $ ssl-check tls-v1-2.badssl.com:1012 incomplete-chain.badssl.com expired.badssl.com
 RavGB ssl-check
-Checked 3 sites on 13 Nov 2026 at 18:28 UTC.
+Checked 3 sites on 13 Nov 2026 at 19:25 UTC.
 A certificate that expires within 30 days gets a warning.
 
 FAIL  expired.badssl.com
@@ -176,7 +176,7 @@ The JSON output for one of these sites:
 {
   "tool": "ssl-check",
   "version": "0.1",
-  "checked_at": "2026-11-13T18:28:52Z",
+  "checked_at": "2026-11-13T19:25:52Z",
   "warn_days": 30,
   "summary": {
     "sites": 1,
