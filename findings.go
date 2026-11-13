@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"crypto/tls"
 	"fmt"
 	"slices"
@@ -40,7 +39,7 @@ type Result struct {
 	TLS11       Probe     `json:"tls1_1,omitempty"`
 	Findings    []Finding `json:"findings"`
 
-	remaining time.Duration // time until expiry, used for sorting
+	remaining time.Duration // time until expiry when the site was checked
 }
 
 // Finding codes. They are stable and appear in the JSON output.
@@ -230,8 +229,9 @@ func shortList(items []string, max int) string {
 }
 
 // sortResults puts sites that could not be checked first, then the rest by
-// time left before expiry, soonest (or most expired) first. Ties keep the
-// order the sites were given in.
+// expiry date, soonest (or most expired) first. Ties keep the order the
+// sites were given in. The expiry date is compared rather than the time
+// left, because each site is checked at a slightly different moment.
 func sortResults(rs []Result) {
 	slices.SortStableFunc(rs, func(a, b Result) int {
 		aNone, bNone := a.Certificate == nil, b.Certificate == nil
@@ -243,7 +243,7 @@ func sortResults(rs []Result) {
 		case bNone:
 			return 1
 		}
-		return cmp.Compare(a.remaining, b.remaining)
+		return a.Certificate.NotAfter.Compare(b.Certificate.NotAfter)
 	})
 }
 
@@ -251,21 +251,23 @@ func sortResults(rs []Result) {
 var fixRules = []struct {
 	codes []string
 	text  string // %s is the list of sites
+	many  string // used instead of text for more than one site, if set
 }{
-	{[]string{codeCannotConnect}, "Check that %s is online and accepts secure connections. Nothing else could be checked there."},
-	{[]string{codeExpired}, "Renew the certificate on %s now. Visitors already see a security warning."},
-	{[]string{codeNotYetValid}, "Check the certificate dates and the server clock on %s."},
-	{[]string{codeNameMismatch}, "Install a certificate on %s that covers the exact site name (add the www name too if you use it)."},
-	{[]string{codeSelfSigned, codeUnknownAuthority}, "Replace the certificate on %s with one from a trusted authority, such as Let's Encrypt or AWS Certificate Manager."},
-	{[]string{codeMissingIntermediate}, "Install the full certificate chain on %s: the certificate plus its intermediate (often a file called fullchain)."},
-	{[]string{codeExpiredIntermediate}, "Install the current intermediate certificate on %s. The certificate provider publishes it."},
-	{[]string{codeWeakSignature}, "Replace the certificate on %s with a new one signed with SHA-256 or better."},
-	{[]string{codeChainNotTrusted}, "Have someone look at the certificate chain on %s. It could not be verified."},
-	{[]string{codeOldTLSOnly}, "Upgrade the server software on %s so it supports TLS 1.2 and TLS 1.3."},
-	{[]string{codeExpiringSoon}, "Renew the certificate on %s soon, or confirm that automatic renewal is working."},
-	{[]string{codeTLS10On, codeTLS11On}, "Turn off TLS 1.0 and TLS 1.1 on %s. Keep TLS 1.2 and TLS 1.3 on."},
-	{[]string{codeWeakCipher}, "Turn off old encryption methods (cipher suites) on %s."},
-	{[]string{codeSmallKey}, "Replace the certificate on %s with one that uses a stronger key."},
+	{[]string{codeCannotConnect}, "Check that %s is online and accepts secure connections. Nothing else could be checked there.",
+		"Check that %s are online and accept secure connections. Nothing else could be checked there."},
+	{[]string{codeExpired}, "Renew the certificate on %s now. Visitors already see a security warning.", ""},
+	{[]string{codeNotYetValid}, "Check the certificate dates and the server clock on %s.", ""},
+	{[]string{codeNameMismatch}, "Install a certificate on %s that covers the exact site name (add the www name too if you use it).", ""},
+	{[]string{codeSelfSigned, codeUnknownAuthority}, "Replace the certificate on %s with one from a trusted authority, such as Let's Encrypt or AWS Certificate Manager.", ""},
+	{[]string{codeMissingIntermediate}, "Install the full certificate chain on %s: the certificate plus its intermediate (often a file called fullchain).", ""},
+	{[]string{codeExpiredIntermediate}, "Install the current intermediate certificate on %s. The certificate provider publishes it.", ""},
+	{[]string{codeWeakSignature}, "Replace the certificate on %s with a new one signed with SHA-256 or better.", ""},
+	{[]string{codeChainNotTrusted}, "Have someone look at the certificate chain on %s, which could not be verified.", ""},
+	{[]string{codeOldTLSOnly}, "Upgrade the server software on %s so it supports TLS 1.2 and TLS 1.3.", ""},
+	{[]string{codeExpiringSoon}, "Renew the certificate on %s soon, or confirm that automatic renewal is working.", ""},
+	{[]string{codeTLS10On, codeTLS11On}, "Turn off TLS 1.0 and TLS 1.1 on %s. Keep TLS 1.2 and TLS 1.3 on.", ""},
+	{[]string{codeWeakCipher}, "Turn off old encryption methods (cipher suites) on %s.", ""},
+	{[]string{codeSmallKey}, "Replace the certificate on %s with one that uses a stronger key.", ""},
 }
 
 // topFixes groups findings from all sites into one list of fixes, most
@@ -281,8 +283,12 @@ func topFixes(rs []Result) []string {
 	}
 	out := []string{}
 	for i, rule := range fixRules {
+		text := rule.text
+		if len(sitesFor[i]) > 1 && rule.many != "" {
+			text = rule.many
+		}
 		if len(sitesFor[i]) > 0 {
-			out = append(out, fmt.Sprintf(rule.text, joinSites(sitesFor[i])))
+			out = append(out, fmt.Sprintf(text, joinSites(sitesFor[i])))
 		}
 	}
 	return out
@@ -297,7 +303,8 @@ func hasAnyCode(fs []Finding, codes []string) bool {
 	return false
 }
 
-// joinSites writes "a", "a and b", "a, b and c", or "a, b, c and 4 more sites".
+// joinSites writes "a", "a and b", "a, b and c", "a, b, c and 1 more site"
+// or "a, b, c and 4 more sites".
 func joinSites(sites []string) string {
 	const max = 3
 	switch {
@@ -305,6 +312,8 @@ func joinSites(sites []string) string {
 		return sites[0]
 	case len(sites) <= max:
 		return strings.Join(sites[:len(sites)-1], ", ") + " and " + sites[len(sites)-1]
+	case len(sites) == max+1:
+		return strings.Join(sites[:max], ", ") + " and 1 more site"
 	default:
 		return fmt.Sprintf("%s and %d more sites", strings.Join(sites[:max], ", "), len(sites)-max)
 	}

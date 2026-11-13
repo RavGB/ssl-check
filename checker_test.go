@@ -385,6 +385,20 @@ func TestSortResults(t *testing.T) {
 	}
 }
 
+// Two sites that share one certificate are checked a moment apart, so their
+// time left differs by a little. They must still keep the order given.
+func TestSortResultsKeepsOrderForSameExpiry(t *testing.T) {
+	end := time.Now().Add(days(45))
+	mk := func(site string, remaining time.Duration) Result {
+		return Result{Site: site, Certificate: &CertInfo{NotAfter: end}, remaining: remaining}
+	}
+	rs := []Result{mk("first.test", days(45)+time.Millisecond), mk("second.test", days(45))}
+	sortResults(rs)
+	if rs[0].Site != "first.test" {
+		t.Errorf("order = %s, %s; sites with the same expiry should keep the order given", rs[0].Site, rs[1].Site)
+	}
+}
+
 func mustTarget(t *testing.T, s string) Target {
 	t.Helper()
 	tg, err := parseTarget(s)

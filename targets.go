@@ -101,8 +101,13 @@ func checkHostName(host string) error {
 	return nil
 }
 
+// byteOrderMark is the invisible mark some Windows editors put at the start
+// of a UTF-8 file (Windows PowerShell 5.1 and older Notepad, for example).
+const byteOrderMark = '\uFEFF'
+
 // readSiteList reads sites from a file: one or more per line, separated by
-// spaces or commas. Blank lines and anything after # are ignored.
+// spaces or commas. Blank lines and anything after # are ignored. Windows
+// line endings and a byte order mark are fine.
 func readSiteList(r io.Reader) ([]string, error) {
 	var out []string
 	sc := bufio.NewScanner(r)
@@ -112,7 +117,7 @@ func readSiteList(r io.Reader) ([]string, error) {
 			line = line[:i]
 		}
 		out = append(out, strings.FieldsFunc(line, func(r rune) bool {
-			return unicode.IsSpace(r) || r == ','
+			return unicode.IsSpace(r) || r == ',' || r == byteOrderMark
 		})...)
 	}
 	return out, sc.Err()

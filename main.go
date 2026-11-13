@@ -44,8 +44,11 @@ Flags:
 const usageFooter = `
 Status for each site:
   OK    certificate valid, trusted and not close to expiry
-  WARN  expires within -warn days, or TLS 1.0 / TLS 1.1 still accepted
-  FAIL  expired, not yet valid, wrong name, not trusted, or cannot connect
+  WARN  expires within -warn days, TLS 1.0 or TLS 1.1 still accepted,
+        an outdated cipher suite was used, or the key is too small
+  FAIL  expired, not yet valid, wrong name, not trusted (for example a
+        missing intermediate), only TLS 1.1 or older offered, or cannot
+        connect
 
 Exit codes:
   0  the run completed and every site is OK

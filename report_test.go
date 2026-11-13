@@ -35,6 +35,7 @@ func TestJoinSites(t *testing.T) {
 		{[]string{"a"}, "a"},
 		{[]string{"a", "b"}, "a and b"},
 		{[]string{"a", "b", "c"}, "a, b and c"},
+		{[]string{"a", "b", "c", "d"}, "a, b, c and 1 more site"},
 		{[]string{"a", "b", "c", "d", "e"}, "a, b, c and 2 more sites"},
 	} {
 		if got := joinSites(tc.in); got != tc.want {
@@ -128,6 +129,29 @@ func TestTopFixesGroupsSitesAndKeepsPriority(t *testing.T) {
 	}
 }
 
+func TestTopFixesGrammarForOneOrMoreSites(t *testing.T) {
+	down := func(sites ...string) []Result {
+		var rs []Result
+		for _, s := range sites {
+			rs = append(rs, failedResult(mustTarget(t, s), "no answer"))
+		}
+		return rs
+	}
+	for _, tc := range []struct {
+		sites []string
+		want  string
+	}{
+		{[]string{"a.test"}, "Check that a.test is online and accepts secure connections."},
+		{[]string{"a.test", "b.test"}, "Check that a.test and b.test are online and accept secure connections."},
+		{[]string{"a.test", "b.test", "c.test", "d.test"}, "Check that a.test, b.test, c.test and 1 more site are online and accept secure connections."},
+	} {
+		got := topFixes(down(tc.sites...))
+		if len(got) != 1 || !strings.HasPrefix(got[0], tc.want) {
+			t.Errorf("sites %v: fixes = %q, want one starting with %q", tc.sites, got, tc.want)
+		}
+	}
+}
+
 func TestTextReportCapsTopFixes(t *testing.T) {
 	now := time.Now()
 	r := Result{Site: "a.test", Host: "a.test", Status: levelFail}
@@ -158,10 +182,56 @@ func TestTextReportForStoppedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
+	flat := strings.Join(strings.Fields(out), " ") // ignore where lines wrap
 	if !strings.Contains(out, "The run was stopped before every site was checked.") || strings.Contains(out, "Nothing to fix") {
 		t.Errorf("a stopped run should not say there is nothing to fix:\n%s", out)
 	}
-	if rep.Summary.Fail != 1 || !rep.hasProblems() {
-		t.Errorf("a site that was not checked should count as FAIL: %+v", rep.Summary)
+	if rep.Summary.Fail != 1 || rep.Summary.NotChecked != 1 || !rep.hasProblems() {
+		t.Errorf("a site that was not checked should count as FAIL and as not checked: %+v", rep.Summary)
+	}
+	for _, want := range []string{
+		"Checked 0 of 1 site on ",
+		"Summary: 1 site, 0 checked before the run was stopped. 0 OK, 0 WARN, 1 FAIL (1 not checked).",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Checked 1 site") || strings.Contains(out, "1 site checked") {
+		t.Errorf("a site that was never checked must not be counted as checked:\n%s", out)
+	}
+}
+
+func TestTextReportForPartlyStoppedRun(t *testing.T) {
+	now := time.Now()
+	ok := Result{Site: "a.test", Host: "a.test", Port: "443", Certificate: goodInfo(now), TLS10: probeRefused, TLS11: probeRefused}
+	assess(&ok, tls.VersionTLS13, tls.TLS_AES_128_GCM_SHA256, days(30), now)
+	rep := buildReport([]Result{
+		ok,
+		stoppedResult(mustTarget(t, "b.test")),
+		stoppedResult(mustTarget(t, "c.test")),
+	}, 30, now)
+	var buf bytes.Buffer
+	if err := writeText(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	flat := strings.Join(strings.Fields(out), " ") // ignore where lines wrap
+	for _, want := range []string{
+		"Checked 1 of 3 sites on ",
+		"The run was stopped before the rest were checked.",
+		"Summary: 3 sites, 1 checked before the run was stopped. 1 OK, 0 WARN, 2 FAIL (2 not checked).",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if rep.Summary != (Summary{Sites: 3, OK: 1, Fail: 2, NotChecked: 2}) {
+		t.Errorf("summary = %+v", rep.Summary)
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if len(line) > wrapWidth {
+			t.Errorf("line %d is %d characters: %q", i+1, len(line), line)
+		}
 	}
 }

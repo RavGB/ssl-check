@@ -28,6 +28,8 @@ type Checker struct {
 	roots   *x509.CertPool // nil means the trust store of this computer
 	now     func() time.Time
 	dial    dialFunc
+	aiaDial dialFunc     // only reaches public addresses unless a test replaces it
+	verify  verifyFunc   // x509 verification, replaced by tests that imitate an OS
 	client  *http.Client // only used to download a missing intermediate
 }
 
@@ -38,16 +40,25 @@ type Option func(*Checker)
 // withRoots trusts only the given root certificates instead of the system ones.
 func withRoots(pool *x509.CertPool) Option { return func(c *Checker) { c.roots = pool } }
 
-// withDialer replaces the function used to open network connections.
-func withDialer(d dialFunc) Option { return func(c *Checker) { c.dial = d } }
+// withDialer replaces the function used to open network connections,
+// including the one for the intermediate download.
+func withDialer(d dialFunc) Option {
+	return func(c *Checker) { c.dial, c.aiaDial = d, d }
+}
+
+// withVerifier replaces the certificate chain verification.
+func withVerifier(v verifyFunc) Option { return func(c *Checker) { c.verify = v } }
 
 func newChecker(warnDays int, timeout time.Duration, opts ...Option) *Checker {
 	var d net.Dialer
+	aia := net.Dialer{Control: publicAddressOnly}
 	c := &Checker{
 		warn:    time.Duration(warnDays) * 24 * time.Hour,
 		timeout: timeout,
 		now:     time.Now,
 		dial:    d.DialContext,
+		aiaDial: aia.DialContext,
+		verify:  (*x509.Certificate).Verify,
 	}
 	for _, o := range opts {
 		o(c)
@@ -55,7 +66,7 @@ func newChecker(warnDays int, timeout time.Duration, opts ...Option) *Checker {
 	c.client = &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			DialContext:           c.dial,
+			DialContext:           c.aiaDial,
 			DisableKeepAlives:     true,
 			TLSHandshakeTimeout:   timeout,
 			ResponseHeaderTimeout: timeout,

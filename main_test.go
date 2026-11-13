@@ -41,6 +41,9 @@ func TestRunJSONSortedWithExitCode1(t *testing.T) {
 	if rep.Summary != (Summary{Sites: 3, OK: 1, Warn: 1, Fail: 1}) {
 		t.Errorf("summary = %+v", rep.Summary)
 	}
+	if strings.Contains(out, "not_checked") {
+		t.Errorf("a complete run should not mention not_checked:\n%s", out)
+	}
 	if len(rep.TopFixes) != 2 ||
 		!strings.Contains(rep.TopFixes[0], "Renew the certificate on expired.test now") ||
 		!strings.Contains(rep.TopFixes[1], "soon.test") {
@@ -151,6 +154,25 @@ func TestRunReadsSiteFileAndStdin(t *testing.T) {
 	}
 }
 
+func TestRunReadsWindowsSiteFile(t *testing.T) {
+	l := buildFullLab(t)
+	path := filepath.Join(t.TempDir(), "sites.txt")
+	if err := os.WriteFile(path, []byte("\ufeffvalid.test\r\nsoon.test\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runTool(t, l, "", "-json", "-f", path)
+	if code != exitProblems {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitProblems, errOut)
+	}
+	var rep Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Summary != (Summary{Sites: 2, OK: 1, Warn: 1}) {
+		t.Errorf("summary = %+v, want 2 sites, 1 OK and 1 WARN", rep.Summary)
+	}
+}
+
 func TestRunUsageErrorsExit2(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -187,7 +209,8 @@ func TestRunHelp(t *testing.T) {
 	if code != exitOK {
 		t.Errorf("exit code = %d, want 0", code)
 	}
-	for _, want := range []string{"Usage:", "-warn", "-concurrency", "-timeout", "-json", "-f file", "Exit codes:", "https://ravgb.com"} {
+	for _, want := range []string{"Usage:", "-warn", "-concurrency", "-timeout", "-json", "-f file", "Exit codes:", "https://ravgb.com",
+		"outdated cipher suite", "key is too small", "only TLS 1.1 or older offered", "missing intermediate"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("help is missing %q", want)
 		}

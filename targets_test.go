@@ -85,3 +85,21 @@ func TestBuildTargetsDedupesAndReportsEveryError(t *testing.T) {
 		t.Errorf("targets = %v", addrs)
 	}
 }
+
+// Windows PowerShell 5.1 and older Notepad start UTF-8 files with a byte
+// order mark and end lines with CRLF.
+func TestReadSiteListWindowsFile(t *testing.T) {
+	for _, in := range []string{
+		"\ufeffa.test\r\nb.test\r\n",
+		"\ufeff# my sites\r\na.test, b.test\r\n",
+		"\ufeff\r\na.test\r\n\r\nb.test",
+	} {
+		got, err := readSiteList(strings.NewReader(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"a.test", "b.test"}; !slices.Equal(got, want) {
+			t.Errorf("readSiteList(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

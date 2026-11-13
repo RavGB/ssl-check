@@ -1,3 +1,4 @@
 # Binary built by "go build"
 /ssl-check
+/ssl-check.exe
 dist/

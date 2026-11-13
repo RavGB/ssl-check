@@ -8,12 +8,14 @@ import (
 	"time"
 )
 
-// Summary counts sites by status.
+// Summary counts sites by status. Sites that were not checked because the
+// run was stopped count as FAIL, and are also counted in NotChecked.
 type Summary struct {
-	Sites int `json:"sites"`
-	OK    int `json:"ok"`
-	Warn  int `json:"warn"`
-	Fail  int `json:"fail"`
+	Sites      int `json:"sites"`
+	OK         int `json:"ok"`
+	Warn       int `json:"warn"`
+	Fail       int `json:"fail"`
+	NotChecked int `json:"not_checked,omitempty"`
 }
 
 // Report is the full output of one run.
@@ -46,6 +48,9 @@ func buildReport(results []Result, warnDays int, at time.Time) Report {
 		default:
 			rep.Summary.Fail++
 		}
+		if hasAnyCode(r.Findings, []string{codeNotChecked}) {
+			rep.Summary.NotChecked++
+		}
 	}
 	return rep
 }
@@ -67,13 +72,20 @@ const (
 
 func writeText(w io.Writer, rep Report) error {
 	var b strings.Builder
+	sum := rep.Summary
 	sites := "sites"
-	if rep.Summary.Sites == 1 {
+	if sum.Sites == 1 {
 		sites = "site"
 	}
+	when := rep.CheckedAt.Format(dateLayout) + " at " + rep.CheckedAt.Format("15:04") + " UTC"
+	checked := sum.Sites - sum.NotChecked
 	fmt.Fprintf(&b, "RavGB ssl-check\n")
-	fmt.Fprintf(&b, "Checked %d %s on %s at %s UTC.\n", rep.Summary.Sites, sites,
-		rep.CheckedAt.Format(dateLayout), rep.CheckedAt.Format("15:04"))
+	if sum.NotChecked > 0 {
+		b.WriteString(wrap(fmt.Sprintf("Checked %d of %d %s on %s. The run was stopped before the rest were checked.",
+			checked, sum.Sites, sites, when), "", ""))
+	} else {
+		fmt.Fprintf(&b, "Checked %d %s on %s.\n", sum.Sites, sites, when)
+	}
 	if rep.WarnDays > 0 {
 		fmt.Fprintf(&b, "A certificate that expires within %d days gets a warning.\n", rep.WarnDays)
 	}
@@ -83,12 +95,17 @@ func writeText(w io.Writer, rep Report) error {
 		writeSite(&b, r)
 	}
 
-	fmt.Fprintf(&b, "\nSummary: %d %s checked. %d OK, %d WARN, %d FAIL.\n",
-		rep.Summary.Sites, sites, rep.Summary.OK, rep.Summary.Warn, rep.Summary.Fail)
+	if sum.NotChecked > 0 {
+		b.WriteString("\n" + wrap(fmt.Sprintf("Summary: %d %s, %d checked before the run was stopped. %d OK, %d WARN, %d FAIL (%d not checked).",
+			sum.Sites, sites, checked, sum.OK, sum.Warn, sum.Fail, sum.NotChecked), "", ""))
+	} else {
+		fmt.Fprintf(&b, "\nSummary: %d %s checked. %d OK, %d WARN, %d FAIL.\n",
+			sum.Sites, sites, sum.OK, sum.Warn, sum.Fail)
+	}
 
 	b.WriteString("\nTop fixes\n")
 	switch {
-	case len(rep.TopFixes) == 0 && stopped(rep.Results):
+	case len(rep.TopFixes) == 0 && sum.NotChecked > 0:
 		b.WriteString(wrap("The run was stopped before every site was checked. Run it again to get a full answer.", "  ", "  "))
 	case len(rep.TopFixes) == 0:
 		b.WriteString(wrap("Nothing to fix right now. Run this check regularly, for example once a day.", "  ", "  "))
@@ -104,15 +121,6 @@ func writeText(w io.Writer, rep Report) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
-}
-
-func stopped(rs []Result) bool {
-	for _, r := range rs {
-		if hasAnyCode(r.Findings, []string{codeNotChecked}) {
-			return true
-		}
-	}
-	return false
 }
 
 func writeSite(b *strings.Builder, r Result) {

@@ -10,8 +10,9 @@ let it tell you when something needs attention.
 
 ## What it checks, and why it matters
 
-For every site it connects to the server the same way a browser would, then
-reports:
+For every site it connects to the server much like a browser would, but it
+also allows old TLS versions and cipher suites so it can report on them.
+Then it reports:
 
 - **When the certificate expires**, and how many days are left. An expired
   certificate puts a full-page security warning in front of every visitor.
@@ -19,8 +20,9 @@ reports:
 - **Whether it is valid yet.** A certificate with a start date in the future
   is rejected too.
 - **Whether it covers the site name.** A certificate for `example.com` does
-  not automatically cover `www.example.com`. The tool lists every name the
-  certificate covers.
+  not automatically cover `www.example.com`. The tool lists the names the
+  certificate covers (the text report shows the first 8, `-json` lists all
+  of them).
 - **Whether browsers trust it**, and if not, why: expired, self-signed,
   issued by an unknown authority, or a missing intermediate certificate. A
   missing intermediate is easy to overlook because some desktop browsers
@@ -90,84 +92,135 @@ Flags can go before or after the site names.
 
 ## Sample output
 
-This is a real run against RavGB's own site on 13 Nov 2026. It found that
-the server still accepts TLS 1.0 and TLS 1.1, which is exactly the kind of
-thing this tool is meant to catch.
+This is a real run on 13 Nov 2026 against three public test sites from
+badssl.com, which are set up on purpose with good and broken certificates:
+one is fine, one has an expired certificate, and one does not send its
+intermediate certificate.
 
 ```text
-$ ssl-check ravgb.com
+$ ssl-check tls-v1-2.badssl.com:1012 incomplete-chain.badssl.com expired.badssl.com
 RavGB ssl-check
-Checked 1 site on 13 Nov 2026 at 18:08 UTC.
+Checked 3 sites on 13 Nov 2026 at 18:28 UTC.
 A certificate that expires within 30 days gets a warning.
 
-WARN  ravgb.com
+FAIL  expired.badssl.com
+      - The certificate expired on 12 Apr 2015 (4232 days ago). Visitors see a
+        full-page security warning.
       - The server still accepts TLS 1.0. It is outdated, has known weaknesses
         and should be turned off.
       - The server still accepts TLS 1.1. It is outdated and should be turned
         off.
-      Expires:      27 Jan 2027 (in 74 days)
-      Valid from:   29 Oct 2026
-      Issued to:    ravgb.com
-      Issued by:    WE1, Google Trust Services
-      Covers:       ravgb.com, *.ravgb.com
+      Expires:      12 Apr 2015 (expired 4232 days ago)
+      Valid from:   9 Apr 2015
+      Issued to:    *.badssl.com
+      Issued by:    COMODO RSA Domain Validation Secure Server CA, COMODO CA
+                    Limited
+      Covers:       *.badssl.com, badssl.com
       Name matches: yes
-      Trusted:      yes
-      Connection:   TLS 1.3, TLS_AES_128_GCM_SHA256
-      Key:          ECDSA 256-bit, signed with ECDSA-SHA256
+      Trusted:      no (expired)
+      Connection:   TLS 1.2, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      Key:          RSA 2048-bit, signed with SHA256-RSA
       TLS 1.0:      still on, should be turned off
       TLS 1.1:      still on, should be turned off
 
-Summary: 1 site checked. 0 OK, 1 WARN, 0 FAIL.
+OK    tls-v1-2.badssl.com:1012
+      No problems found.
+      Expires:      28 Dec 2026 (in 45 days)
+      Valid from:   29 Sep 2026
+      Issued to:    *.badssl.com
+      Issued by:    YR1, Let's Encrypt
+      Covers:       *.badssl.com, badssl.com
+      Name matches: yes
+      Trusted:      yes
+      Connection:   TLS 1.2, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      Key:          RSA 2048-bit, signed with SHA256-RSA
+      TLS 1.0:      off (good)
+      TLS 1.1:      off (good)
+
+FAIL  incomplete-chain.badssl.com
+      - The server does not send the intermediate certificate that links this
+        certificate to a trusted authority. Some browsers fill the gap on
+        their own, but many phones, apps and tools refuse to connect.
+      - The server still accepts TLS 1.0. It is outdated, has known weaknesses
+        and should be turned off.
+      - The server still accepts TLS 1.1. It is outdated and should be turned
+        off.
+      Expires:      28 Dec 2026 (in 45 days)
+      Valid from:   29 Sep 2026
+      Issued to:    *.badssl.com
+      Issued by:    YR1, Let's Encrypt
+      Covers:       *.badssl.com, badssl.com
+      Name matches: yes
+      Trusted:      no (missing intermediate)
+      Connection:   TLS 1.2, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      Key:          RSA 2048-bit, signed with SHA256-RSA
+      TLS 1.0:      still on, should be turned off
+      TLS 1.1:      still on, should be turned off
+
+Summary: 3 sites checked. 1 OK, 0 WARN, 2 FAIL.
 
 Top fixes
-  1. Turn off TLS 1.0 and TLS 1.1 on ravgb.com. Keep TLS 1.2 and TLS 1.3 on.
+  1. Renew the certificate on expired.badssl.com now. Visitors already see a
+     security warning.
+  2. Install the full certificate chain on incomplete-chain.badssl.com: the
+     certificate plus its intermediate (often a file called fullchain).
+  3. Turn off TLS 1.0 and TLS 1.1 on expired.badssl.com and
+     incomplete-chain.badssl.com. Keep TLS 1.2 and TLS 1.3 on.
 $ echo $?
 1
 ```
 
-The same run with `-json`:
+The JSON output for one of these sites:
 
 ```json
 {
   "tool": "ssl-check",
   "version": "0.1",
-  "checked_at": "2026-11-13T18:08:25Z",
+  "checked_at": "2026-11-13T18:28:52Z",
   "warn_days": 30,
   "summary": {
     "sites": 1,
     "ok": 0,
-    "warn": 1,
-    "fail": 0
+    "warn": 0,
+    "fail": 1
   },
   "results": [
     {
-      "site": "ravgb.com",
-      "input": "ravgb.com",
-      "host": "ravgb.com",
+      "site": "incomplete-chain.badssl.com",
+      "input": "incomplete-chain.badssl.com",
+      "host": "incomplete-chain.badssl.com",
       "port": "443",
-      "status": "WARN",
+      "status": "FAIL",
       "certificate": {
-        "subject_cn": "ravgb.com",
-        "issuer": "WE1, Google Trust Services",
-        "valid_from": "2026-10-29T04:37:14Z",
-        "valid_to": "2027-01-27T05:36:02Z",
-        "days_left": 74,
+        "subject_cn": "*.badssl.com",
+        "issuer": "YR1, Let's Encrypt",
+        "valid_from": "2026-09-29T20:02:56Z",
+        "valid_to": "2026-12-28T20:02:55Z",
+        "days_left": 45,
         "dns_names": [
-          "ravgb.com",
-          "*.ravgb.com"
+          "*.badssl.com",
+          "badssl.com"
         ],
         "name_matches": true,
-        "trusted": true,
-        "key_type": "ECDSA",
-        "key_bits": 256,
-        "signature_algorithm": "ECDSA-SHA256",
-        "certificates_sent": 3
+        "trusted": false,
+        "untrusted_reasons": [
+          "missing intermediate"
+        ],
+        "key_type": "RSA",
+        "key_bits": 2048,
+        "signature_algorithm": "SHA256-RSA",
+        "certificates_sent": 1
       },
-      "tls_version": "TLS 1.3",
-      "cipher_suite": "TLS_AES_128_GCM_SHA256",
+      "tls_version": "TLS 1.2",
+      "cipher_suite": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
       "tls1_0": "accepted",
       "tls1_1": "accepted",
       "findings": [
+        {
+          "level": "FAIL",
+          "code": "missing_intermediate",
+          "message": "The server does not send the intermediate certificate that links this certificate to a trusted authority. Some browsers fill the gap on their own, but many phones, apps and tools refuse to connect."
+        },
         {
           "level": "WARN",
           "code": "tls1_0_on",
@@ -182,7 +235,8 @@ The same run with `-json`:
     }
   ],
   "top_fixes": [
-    "Turn off TLS 1.0 and TLS 1.1 on ravgb.com. Keep TLS 1.2 and TLS 1.3 on."
+    "Install the full certificate chain on incomplete-chain.badssl.com: the certificate plus its intermediate (often a file called fullchain).",
+    "Turn off TLS 1.0 and TLS 1.1 on incomplete-chain.badssl.com. Keep TLS 1.2 and TLS 1.3 on."
   ]
 }
 ```
@@ -190,14 +244,17 @@ The same run with `-json`:
 With `jq` you can pull out just what you need:
 
 ```sh
-$ ssl-check -json ravgb.com | jq -r '.results[] | "\(.site) \(.status) \(.certificate.days_left)"'
-ravgb.com WARN 74
+$ ssl-check -json tls-v1-2.badssl.com:1012 incomplete-chain.badssl.com expired.badssl.com | jq -r '.results[] | "\(.site) \(.status) \(.certificate.days_left)"'
+expired.badssl.com FAIL -4232
+tls-v1-2.badssl.com:1012 OK 45
+incomplete-chain.badssl.com FAIL 45
 ```
 
 ## What the statuses mean
 
 Sites are listed most urgent first: sites that could not be reached, then
-the rest by days left, soonest first.
+the rest by days left, soonest first. Sites with the same expiry date keep
+the order you gave them in.
 
 | Status | Meaning |
 | --- | --- |
@@ -213,6 +270,11 @@ In JSON, each problem has a stable `code`: `cannot_connect`, `not_checked`
 `tls1_1_on`, `weak_cipher`, `small_key`. The `tls1_0` and `tls1_1` fields
 are `accepted`, `refused` or `unknown` (no clear answer, for example a
 timeout).
+
+If the run is stopped with Ctrl+C, the sites that were not checked yet show
+as `FAIL` with the code `not_checked`. The report then says how many sites
+were checked before it stopped, and the JSON summary gets a `not_checked`
+count.
 
 ## Exit codes
 
@@ -237,19 +299,28 @@ and uses the `mail` command, so the machine must be able to send email:
 - Every site is checked in its own goroutine. A semaphore keeps at most
   `-concurrency` checks running at once, and every connection has its own
   `-timeout`. Pressing Ctrl+C cancels the checks still running, prints
-  what was found so far and exits with code 2.
+  what was found so far (and how many sites were checked) and exits with
+  code 2.
 - The first connection accepts any certificate on purpose, so that broken
   certificates can still be inspected and explained. The tool then verifies
   the chain itself with Go's `crypto/x509` against the trust store of the
   computer it runs on (plus the intermediates the server sent), and checks
   the name separately. On macOS and Windows, Go asks the operating system to
   do this verification.
+- The operating system can fill in a missing intermediate on its own, from
+  its cache or by downloading it, and then call the chain trusted. So when
+  the chain is trusted, the tool also compares it with the certificates the
+  server actually sent. An intermediate the server did not send is reported
+  as missing.
 - When the chain is not trusted, the tool downloads the issuer certificate
   from the address written inside the certificate (the "Authority
   Information Access" field). If the chain becomes trusted with it, the
   problem is reported as a missing intermediate. This download is the only
   web request it makes, and it identifies itself with the User-Agent
-  `RavGB-ssl-check/0.1 (+https://ravgb.com)`.
+  `RavGB-ssl-check/0.1 (+https://ravgb.com)`. Because the site being
+  checked decides that address, the download only goes to public internet
+  addresses. A link to a private, loopback or link-local address (such as
+  the cloud metadata address 169.254.169.254) is skipped.
 - TLS 1.0 and TLS 1.1 are tested with two extra connections, each one
   allowed to use only that version.
 - Nothing is sent to the site beyond the TLS handshakes.
@@ -271,6 +342,9 @@ and uses the `mail` command, so the machine must be able to send email:
   away (like HTTPS) are supported.
 - **International domain names** must be given in their ASCII form (the
   one that starts with `xn--`).
+- **Intermediates kept on a private network.** The intermediate download
+  skips private addresses, so for a certificate from a private authority a
+  missing intermediate can be reported as an unknown authority instead.
 - **Every browser's opinion.** Trust is judged by the computer running the
   tool. A particular browser or phone can occasionally disagree.
 
@@ -286,7 +360,8 @@ The tests need no internet. They create their own certificate authority and
 certificates (valid, expired, expiring in 10 days, wrong name, self-signed,
 not yet valid, missing intermediate, unknown authority, and more) and serve
 them from local test servers, including servers that still accept TLS 1.0
-and TLS 1.1.
+and TLS 1.1. A stand-in for the macOS and Windows verifiers, which fills in
+a missing intermediate on its own, checks that the tool still reports it.
 
 ## License
 
